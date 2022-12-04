@@ -15,9 +15,10 @@
 
 # include <stdlib.h>
 # include <unistd.h>
+# include <stdio.h>
 
 # ifndef BUFFER_SIZE
-# define BUFFER_SIZE 42
+#  define BUFFER_SIZE 42
 # endif
 
 char	*get_next_line(int fd);
@@ -25,12 +26,16 @@ char	*get_next_line(int fd);
 typedef struct s_bufobj
 {
 	char	*buf;
-	size_t	buf_size;
-	int 	eof;
-}       t_bufobj;
+	ssize_t	buf_size;
+	int		eof;
+	int		buf_allocated;
+	ssize_t	index_of_nl;
+	ssize_t	new_buf_size;
+	char	*tmp;
+}	t_bufobj;
 
-void	*gnl_realloc(void *src, size_t src_len, size_t new_len);
-size_t  gnl_strlen(const char *s);
+int		gnl_realloc(t_bufobj *bufobj, ssize_t new_len);
+size_t	gnl_strlen(const char *s);
 void	*gnl_memcpy(void *dest, const void *src, size_t n);
 
 #endif

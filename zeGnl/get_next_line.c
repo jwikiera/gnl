@@ -12,108 +12,96 @@
 
 #include "get_next_line.h"
 
-int	ioc(char c, char *haystack, size_t haystack_size)
+ssize_t	ioc(char c, t_bufobj *bufobj)
 {
-	size_t	i;
+	ssize_t	i;
 
 	i = 0;
-	while (i < haystack_size)
+	while (bufobj->buf && bufobj->buf_size > 0
+		&& bufobj->buf_allocated && i < bufobj->buf_size)
 	{
-		if (haystack[i] == c)
+		if (bufobj->buf[i] == (const char)c)
 			return (i);
 		i ++;
 	}
 	return (-1);
 }
 
-t_bufobj	*get_bufobj(t_bufobj *bufobj)
+void	init_bufobj(t_bufobj *bufobj)
 {
-	t_bufobj	*res;
-
+	bufobj->eof = 0;
 	if (bufobj)
-		return bufobj;
-	res = malloc(sizeof(*res));
-	if (res == NULL)
-		return (NULL);
-	/*res->buf = malloc(1);
-	if (res->buf == NULL)
-	{
-		free(res);
-		return (NULL);
-	}*/
-	res->buf = 0;
-	res->buf_size = 0;
-	res->eof = 0;
-	return (res);
+		return ;
+	bufobj->buf = 0;
+	bufobj->buf_size = 0;
+	bufobj->buf_allocated = 0;
 }
 
-void	*gnl_memcpy(void *dest, const void *src, size_t n)
+int	handle_readsize(t_bufobj *bufobj, ssize_t readsize)
 {
-	unsigned int	i;
-	char			*ptr;
-	const char		*ptr2;
+	if (readsize > 0)
+		return (0);
+	if (readsize == 0)
+		bufobj->eof = 1;
+	if (readsize == -1 || bufobj->buf_size == 0)
+	{
+		if (bufobj->buf_allocated && bufobj->buf)
+		{
+			free(bufobj->buf);
+			bufobj->buf = NULL;
+			bufobj->buf_size = 0;
+			bufobj->buf_allocated = 0;
+		}
+		return (1);
+	}
+	return (0);
+}
 
-	if (dest == 0 && src == 0)
+char	*gnl_2(t_bufobj *bufobj)
+{
+	char			*res;
+
+	res = malloc(bufobj->index_of_nl + 2 - bufobj->eof);
+	if (res == NULL)
+		return (NULL);
+	gnl_memcpy(res, bufobj->buf, bufobj->index_of_nl + 1 - bufobj->eof);
+	res[bufobj->index_of_nl + 1 - bufobj->eof] = 0;
+	bufobj->new_buf_size
+		= bufobj->buf_size - (bufobj->index_of_nl + 1 - bufobj->eof);
+	bufobj->tmp = malloc(bufobj->new_buf_size);
+	gnl_memcpy(bufobj->tmp, bufobj->buf + bufobj->index_of_nl + 1 - bufobj->eof,
+		bufobj->new_buf_size);
+	if (bufobj->buf_allocated)
 	{
-		return (dest);
+		free(bufobj->buf);
+		bufobj->buf_allocated = 0;
 	}
-	i = 0;
-	ptr = dest;
-	ptr2 = src;
-	while (i < n)
-	{
-		*(ptr + i) = *(ptr2 + i);
-		i ++;
-	}
-	return (dest);
+	bufobj->buf = bufobj->tmp;
+	bufobj->buf_size = bufobj->new_buf_size;
+	bufobj->buf_allocated = 1;
+	return (res);
 }
 
 char	*get_next_line(int fd)
 {
-	static t_bufobj	*bufobj;
-	size_t			readsize;
-	char			*res;
+	static t_bufobj	bufobj[4096];
+	ssize_t			readsize;
 
-	if (fd < 0 || fd >= 4096)
+	if (fd < 0 || fd > 4095)
 		return (NULL);
-	bufobj = get_bufobj(bufobj);
-	if (bufobj == NULL)
-		return (NULL);
-	if (bufobj->eof)
-		return (NULL);
-	while (ioc('\n', bufobj->buf, bufobj->buf_size) == -1 && !bufobj->eof)
+	init_bufobj(&(bufobj[fd]));
+	while (ioc('\n', &(bufobj[fd])) == -1 && !bufobj[fd].eof)
 	{
-		bufobj->buf = gnl_realloc(bufobj->buf, bufobj->buf_size, bufobj->buf_size + BUFFER_SIZE);
-		readsize = read(fd, bufobj->buf + bufobj->buf_size, BUFFER_SIZE);
-		if (readsize < 0)
-		{
-			free(bufobj->buf);
+		if (!gnl_realloc(&(bufobj[fd]), bufobj[fd].buf_size + BUFFER_SIZE))
 			return (NULL);
-		}
-		else if (readsize == 0)
-		{
-			bufobj->eof = 1;
-			if (bufobj->buf_size == 0)
-				return (NULL);
-		}
+		readsize = read(fd, bufobj[fd].buf + bufobj[fd].buf_size, BUFFER_SIZE);
+		if (handle_readsize(&(bufobj[fd]), readsize))
+			return (NULL);
 		else
-			bufobj->buf_size += readsize;
+			bufobj[fd].buf_size += readsize;
 	}
-	int index_of_nl = ioc('\n', bufobj->buf, bufobj->buf_size);
-	if (index_of_nl == -1)
-		index_of_nl = bufobj->buf_size;
-	res = malloc(index_of_nl + 2 - bufobj->eof);
-	if (res == NULL)
-		return (NULL);
-	gnl_memcpy(res, bufobj->buf, index_of_nl + 1 - bufobj->eof);
-	res[index_of_nl + 1 - bufobj->eof] = 0;
-
-	size_t new_buf_size = bufobj->buf_size - (index_of_nl + 1 - bufobj->eof);
-	char *tmp = malloc(new_buf_size);
-	gnl_memcpy(tmp, bufobj->buf + index_of_nl + 1 - bufobj->eof, new_buf_size);
-	free(bufobj->buf);
-	bufobj->buf = tmp;
-	bufobj->buf_size = new_buf_size;
-
-	return (res);
+	bufobj[fd].index_of_nl = ioc('\n', &(bufobj[fd]));
+	if (bufobj[fd].index_of_nl == -1)
+		bufobj[fd].index_of_nl = bufobj[fd].buf_size;
+	return (gnl_2(&(bufobj[fd])));
 }
